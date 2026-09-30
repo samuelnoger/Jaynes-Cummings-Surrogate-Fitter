@@ -23,5 +23,5 @@ This project relies on the following core open-source libraries:
 ---
 
 ## Acknowledgments & AI Usage
-* Developed as part of quantum optics and machine learning explorations. 
+* Developed as part of quantum information processing and machine learning explorations. 
 * **AI Assistance:** Generative AI tools were utilized during the development of this project to assist with code structuring, debugging argument parsing quirks, and optimizing pipeline modularity.
