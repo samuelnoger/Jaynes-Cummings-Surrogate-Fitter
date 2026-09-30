@@ -1,0 +1,13 @@
+# Python / Jupyter
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+.DS_Store
+interactive_dashboard.py
+
+# Data and Checkpoints (too large for GitHub)
+checkpoints/
+*.pth
+*.pt
+evaluation_plots/
