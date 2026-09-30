@@ -6,7 +6,7 @@ A modular, lightweight Python pipeline designed to perform parameter fitting for
 
 ## Key Features
 * **Neural Surrogate Modeling:** Replaces slow numerical solvers with a fast, pre-trained neural network to predict quantum trajectories.
-* **Physical Parameter Optimization:** Fits physical parameters ($g$, $\kappa$, $\gamma$) efficiently using PyTorch with positivity constraints enforced via `softplus`.
+* **Physical Parameter Optimization:** Fits physical parameters ($g$, $\kappa$, $\gamma$) efficiently using PyTorch with positivity constraints.
 * **Flexible Execution:** Works seamlessly in both script-based terminal workflows and interactive Jupyter notebooks via robust argument parsing (`parse_known_args`).
 * **Modular Structure:** Clean separation of simulation engines (`sim.py`), model architectures (`model.py`), and fitting pipelines (`fit_param/`).
 
