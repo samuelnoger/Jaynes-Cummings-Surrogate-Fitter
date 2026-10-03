@@ -2,7 +2,7 @@
 
 A small, self-contained project on **dispersive qubit readout**: deciding whether a superconducting qubit was prepared in |0⟩ or |1⟩ from a noisy microwave measurement record. Records are simulated with QuTiP, and a 1D CNN is benchmarked against the standard classical readout methods (integrated threshold and matched filter).
 
-This is a learning project, not a research contribution. It reproduces a known idea (neural readout classifiers can beat linear filters when the qubit relaxes during measurement) on a simplified simulator, and tries to be honest about where the network helps and where it doesn't.
+This project is an engineering demonstration rather than novel research. It implements an established concept—that neural networks handle mid-readout qubit relaxation better than linear filters—using a custom QuTiP simulator. The objective is to rigorously benchmark the exact regime where machine learning outperforms classical methods, and where it simply ties them.
 
 ![Assignment Fidelity vs T1 sweep plot](t1_fidelity_sweep.png)
 
@@ -12,7 +12,7 @@ This is a learning project, not a research contribution. It reproduces a known i
 
 In circuit QED, a qubit is read out through a microwave cavity. The qubit state shifts the cavity response, so a probe tone returns a different complex amplitude α = I + iQ for |0⟩ and |1⟩. The signal is small compared to amplifier noise, so the record has to be combined over time to decide.
 
-The complication is **T1 decay**: a qubit prepared in |1⟩ can relax to |0⟩ during the readout window. The record then switches from "excited-like" to "ground-like" partway through. A plain integrator or a fixed-weight matched filter cannot use *when* the switch happens. A network that sees the time structure potentially can.
+The complication is **T1 decay**: a qubit prepared in |1⟩ can relax to |0⟩ during the readout window. The record then switches from "excited-like" to "ground-like" partway through. A plain integrator or a fixed-weight matched filter cannot account for when the switch happens. A network that sees the time structure potentially can.
 
 The metric is **assignment fidelity**, 1 − [P(0|1) + P(1|0)] / 2, where 0.5 is guessing and 1.0 is perfect.
 
