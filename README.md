@@ -14,14 +14,14 @@ In circuit QED, a qubit is read out through a microwave cavity. The qubit state 
 
 The complication is **T1 decay**: a qubit prepared in |1⟩ can relax to |0⟩ during the readout window. The record then switches from "excited-like" to "ground-like" partway through. A plain integrator or a fixed-weight matched filter cannot account for when the switch happens. A network that sees the time structure potentially can.
 
-The metric is **assignment fidelity**, 1 − [P(0|1) + P(1|0)] / 2, where 0.5 is guessing and 1.0 is perfect.
+The metric is **assignment fidelity**, $1 − [P(0|1) + P(1|0)] / 2$, where $0.5$ is guessing and 1.0 is perfect.
 
 ## Simulation model
 
 Simulation happens in two stages (units: µs):
 
 1. **Qubit trajectories:** QuTiP `mcsolve` runs quantum-jump trajectories with a T1 collapse operator. Each trajectory is a step function, excited until a random jump time and ground afterwards. Ground-state preparations never jump.
-2. **Cavity response:** given the qubit trajectory s(t) = ±1, the cavity field obeys
+2. **Cavity response:** given the qubit trajectory $s(t) = \pm 1$, the cavity field obeys
 
    dα/dt = −iε − (κ/2 + iχ·s(t)) α
 
