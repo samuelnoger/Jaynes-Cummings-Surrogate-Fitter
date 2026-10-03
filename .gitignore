@@ -9,4 +9,3 @@ __pycache__/
 checkpoints/
 *.pth
 *.pt
-evaluation_plots/

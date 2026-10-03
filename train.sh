@@ -13,7 +13,7 @@ LEARNING_RATE=1e-3
 ARCH="cnn"                    # cnn | gru
 HIDDEN_NEURONS=64
 BATCH_SIZE=256
-DATA_PATH="data/readout_dataset.pt"
+DATA_PATH="data/readout_dataset_2q.pt"
 CHECKPOINT_DIR="checkpoints/"
 
 echo "======================================================"

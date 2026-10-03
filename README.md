@@ -1,118 +1,150 @@
 # Qubit Readout Classification with Neural Networks
 
-A small, self-contained project on **dispersive qubit readout**: deciding whether a superconducting qubit was prepared in $\vert{}0\rangle$ or $\vert{}1\rangle$ from a noisy microwave measurement record. Records are simulated with QuTiP, and a 1D CNN is benchmarked against the standard classical readout methods (integrated threshold and matched filter).
+A small, self-contained project on **dispersive qubit readout**: deciding whether a superconducting qubit was prepared in $\vert{}0\rangle$ or $\vert{}1\rangle$ from a noisy microwave measurement record. Records are simulated with QuTiP, and a 1D CNN is compared against the standard classical readout methods and against stronger linear and nonlinear classical baselines.
 
-This project is an engineering demonstration rather than novel research. It implements an established concept—that neural networks handle mid-readout qubit relaxation better than linear filters—using a custom QuTiP simulator. The objective is to rigorously benchmark the exact regime where machine learning outperforms classical methods, and where it simply ties them.
+This is a learning project, not a research contribution. It reproduces a known idea (neural readout classifiers can help when the qubit relaxes during measurement) on a simplified simulator, then looks at what happens when two multiplexed qubits interfere with each other.
+
+<img src="results/figures/sweep_t1.png" alt="Fidelity vs T1" width="400">
+<img src="results/figures/sweep_zeta.png" alt="Fidelity vs cross-dispersive shift" width="400">
+<img src="results/figures/sweep_leak.png" alt="Fidelity vs signal leakage" width="400">
 
 ---
 
 ## The problem
 
-In circuit QED, a qubit is read out through a microwave cavity. The qubit state shifts the cavity response, so a probe tone returns a different complex amplitude $\alpha = I + iQ$ for $\vert{}0\rangle$ and $\vert{}1\rangle$. The signal is small compared to amplifier noise, so the record has to be combined over time to decide.
+In circuit QED, a qubit is read out through a microwave cavity. The qubit state shifts the cavity response, so a probe tone returns a different complex amplitude $\alpha = I + iQ$ for $\vert{}0\rangle$ and $\vert{}1\rangle$. The signal is small compared to amplifier noise, so the record has to be combined over time to decide. Two things make this harder:
 
-The complication is **$T_1$ decay**: a qubit prepared in $\vert{}1\rangle$ can relax to $\vert{}0\rangle$ during the readout window. The record then switches from "excited-like" to "ground-like" partway through. A plain integrator or a fixed-weight matched filter cannot account for when the switch happens. A network that sees the time structure potentially can.
+1. **$T_1$ decay.** A qubit prepared in $\vert{}1\rangle$ can relax during the readout window, so the record switches from "excited-like" to "ground-like" partway through. A plain integrator or a fixed-weight filter cannot use *when* the switch happens.
+2. **Crosstalk.** With several qubits read out through shared hardware, one qubit's signal leaks into another's channel, and one qubit's state can shift another's resonator.
 
-The metric is **assignment fidelity**, $1 - [P(0\vert{}1) + P(1\vert{}0)] / 2$, where 0.5 is guessing and 1.0 is perfect.
+The metric is **assignment fidelity**, $1 - \frac{P(0\vert{}1) + P(1\vert{}0)}{2}$, where 0.5 is guessing and 1.0 is perfect. For two qubits it is computed per qubit and averaged.
 
 ## Simulation model
 
 Simulation happens in two stages (units: µs):
 
-1. **Qubit trajectories:** QuTiP `mcsolve` runs quantum-jump trajectories with a $T_1$ collapse operator. Each trajectory is a step function, excited until a random jump time and ground afterwards. Ground-state preparations never jump.
-2. **Cavity response:** given the qubit trajectory $s(t) = \pm 1$, the cavity field obeys
+1. **Qubit trajectories.** QuTiP `mcsolve` runs quantum-jump trajectories with a $T_1$ collapse operator. Each trajectory is excited until a random jump time and ground afterwards. Ground-state preparations never jump.
+2. **Cavity response.** Given the qubit trajectory $s(t) = \pm 1$, the cavity field obeys
 
 $$\frac{d\alpha}{dt} = -i\varepsilon - \left(\frac{\kappa}{2} + i\chi s(t)\right) \alpha$$
 
-
-
 which is solved exactly on each time step because $s(t)$ is piecewise constant. Gaussian noise of standard deviation $\sigma$ is added to each $(I, Q)$ sample.
+
+**Two qubits.** The qubits decay independently. Each resonator $i \in \{1, 2\}$ obeys
+
+$$\frac{d\alpha_i}{dt} = -i\varepsilon - \left(\frac{\kappa}{2} + i\left(\chi s_i(t) + \zeta s_j(t)\right)\right) \alpha_i, \qquad j \neq i,$$
+
+and the measured channels mix linearly,
+
+$$m_i = \alpha_i + \eta\, \alpha_j + \text{noise}.$$
+
+- $\zeta$ (`--zeta`) is a **cross-dispersive shift**: the other qubit's state changes this resonator's response. It acts nonlinearly on the records.
+- $\eta$ (`--leak`) is **linear signal leakage** between channels. A classifier that sees both channels can in principle subtract it.
+
+A static $J\sigma_{z,1}\sigma_{z,2}$ coupling is left out on purpose. It is diagonal in the computational basis, and since qubits are only prepared in basis states, it would not change the records.
 
 This is a semi-classical readout model. It does **not** solve the full stochastic master equation for the coupled qubit-cavity system.
 
-Default parameters: $T_1 = 3$, readout window = 2, $dt = 0.02$ (101 samples), $\kappa = 10$, $\chi = 5$, $\varepsilon = 5$, $\sigma = 3$.
+Defaults: $T_1 = 3$, readout window 2, dt 0.02 (101 samples), $\kappa = 10$, $\chi = 5$, $\varepsilon = 5$, $\sigma = 3$ (the sweeps use $\sigma = 1$). For two qubits: $\zeta = 1$, $\eta = 0.1$.
 
 ## Classifiers
 
-| Method | Description |
-| --- | --- |
-| Integrated threshold | Sum each quadrature over the record, project onto the class-mean separation, apply a threshold |
-| Matched filter | Weight each time step by (mean excited record − mean ground record), sum, apply a threshold |
-| 1D CNN | Three conv layers and a dense head on the raw $(I, Q)$ record, no global pooling (so time position is kept) |
-| GRU | Small recurrent alternative (`--arch gru`) |
+- **Integrated threshold:** sum the record over time and apply a threshold. Sees only its own qubit's channels.
+- **Matched filter:** weight each time step by the difference of the mean excited and mean ground records. Own channels only.
+- **Linear discriminant (LDA):** the best linear classifier on the full record. Fitted on the own channels ("own") or on all channels ("all").
+- **Gradient boosting:** a nonlinear classical model on the flattened record.
+- **1D CNN:** three conv layers and a dense head on the raw record, with one output per qubit. No global pooling, so the time position of a switch is kept. A small GRU is available as an alternative (`--arch gru`).
 
 Thresholds are chosen on training data, the best epoch is chosen on a validation set, and all reported numbers come from an independent test set (separate random seeds for each split).
 
 ## Results
 
-Sweep over the qubit relaxation time at fixed readout window (2 µs) and noise $\sigma = 1$.
+All sweeps use $\sigma = 1$ and 3 seeds. The two-qubit sweeps change one crosstalk mechanism at a time: the $\zeta$ sweep has $\eta = 0$, and the $\eta$ sweep has $\zeta = 0$. Exact numbers are in `results/sweeps/`.
 
-<img src="t1_fidelity_sweep.png" alt="Assignment Fidelity vs T1 sweep plot" width="600">
+### Single qubit: $T_1$ decay
 
-Observations:
+Fidelity rises with $T_1$ for every method, and the curves converge once decay is rare (all near 0.98 at $T_1 = 15$ µs). The integrated threshold is the weakest, falling to about 0.72 at $T_1 = 0.5$ µs. The matched filter is about 3 points behind the best methods when $T_1$ is comparable to the readout window.
 
-* The CNN beats both baselines at every $T_1$, with a gain of about 3 points when $T_1$ is comparable to the readout window.
-* The CNN's advantage shrinks as $T_1$ grows and decay becomes rare. The integrated threshold and matched filter coincide for long $T_1$.
-* The matched filter gains most over the integrated threshold at short $T_1$, because its weights automatically down-weight late times, when excited qubits have likely relaxed.
-* At the default $\sigma = 3$ the noise dominates the error: the CNN (0.829) is within statistical noise of the matched filter (0.823).
+The more informative comparison is with LDA. The matched filter's kernel is not the optimal *linear* filter here, because the excited class is a mixture of decay times, and an LDA on the full record does better. It lands very close to the CNN at every $T_1$. The CNN is ahead of LDA at all $T_1$ values, but only by a few tenths of a point. So most of the apparent gain of the network over the matched filter is better linear weighting, and the genuinely nonlinear part is small.
+
+### Two qubits: cross-dispersive shift $\zeta$
+
+Every method degrades as $\zeta$ grows, because the information in the records really shrinks: when $\zeta$ is comparable to $\chi$, a resonator cannot identify its own qubit without knowing the other. The independent methods degrade most, joint LDA less, and the CNN least. At the strongest shift tested ($\zeta = 4$, with $\chi = 5$), the CNN stays near 0.92, joint LDA falls to about 0.89, and the independent filters to 0.83-0.87. Because the shift is nonlinear, a linear filter cannot undo it fully, and this is where the network has a clear advantage.
+
+### Two qubits: linear leakage $\eta$
+
+The independent methods lose 4 to 6 points by $\eta = 0.5$. Joint LDA recovers most of that (about 1 point lost), and the CNN stays almost flat, ending around 1 point above joint LDA. A plausible explanation, which I have not tested, is that the other qubit's contribution depends on when it decays, which a fixed linear subtraction cannot follow.
+
+### Takeaways
+
+- Classifiers that see only their own channel lose fidelity under both kinds of crosstalk. A joint linear filter is the right classical baseline, not the matched filter.
+- Without crosstalk the CNN is only slightly better than the best linear baseline. Its advantage grows with crosstalk, especially the nonlinear cross-dispersive shift.
+- The crosstalk values where the network clearly wins ($\zeta = 3$-4, $\eta = 0.3$-0.5) are much larger than typical hardware. At small, realistic values, all joint methods are within about half a point of each other.
 
 ## Limitations
 
-* Everything is simulated from a model I wrote, so the results show that the network learns structure a linear filter cannot, not that it would work on a real device.
-* The cavity part is a linear semi-classical model, and there is no multi-qubit crosstalk yet.
-* Hyperparameters are not tuned. The CNN is trained with fixed settings for 20-30 epochs, so its numbers are likely lower bounds.
-* Sweeps use 3 seeds. Small gaps (below roughly a point) should not be over-interpreted.
-* There is no Bayes-optimal reference yet, so it is unknown how close the CNN is to the best possible classifier.
+- Everything is simulated from a model I wrote. The results show what the network can learn in this setup, not how it would do on a real device.
+- The cavity model is linear and semi-classical, and the noise is white and Gaussian.
+- Qubits are prepared in computational basis states only, so there are no superpositions, entanglement, or measurement back-action.
+- Gradient boosting is a weak nonlinear baseline here. A tuned MLP would be fairer.
+- Hyperparameters are not tuned. The CNN uses fixed settings for 20-30 epochs, so its numbers are likely lower bounds.
+- Sweeps use 3 seeds. Gaps below roughly half a point should not be over-interpreted.
+- There is no Bayes-optimal reference yet, so it is unknown how close any classifier is to the best possible one.
 
 ## Project structure
 
-```text
-sim/engine.py              QuTiP jump trajectories + cavity response + noise
-model/readout_model.py     ReadoutCNN and ReadoutGRU
+```
+sim/engine.py              QuTiP jump trajectories + cavity response + noise (1 qubit)
+sim/engine_2q.py           Two-qubit readout with cross-dispersive shift and linear leakage
+model/readout_model.py     Configurable ReadoutCNN and ReadoutGRU (one logit per qubit)
 data/generate_data.py      Dataset generation (train/val/test, independent seeds)
 train/arguments.py         All command-line arguments (physics, data, training)
 train/train.py             Training, validation, and comparison with the baselines
-baselines.py               Integrated threshold, matched filter, assignment fidelity
+baselines_2.py             Independent vs. joint classical classifiers, assignment fidelity
 plot_records.py            Raw records, class-mean records, matched-filter histograms
-sweep.py                   T1 sweep with several seeds, JSON output and plot
+sweep.py                   T1, cross-dispersive and leakage sweeps with several seeds
 generate.sh / run_train.sh Convenience scripts with the default settings
-
+results/figures, results/sweeps   generated plots and sweep data
 ```
 
 ## Quick start
 
 ```bash
-pip install qutip torch numpy matplotlib tqdm     # QuTiP >= 5
+pip install qutip scikit-learn torch numpy matplotlib tqdm     # QuTiP >= 5
 
-python -m sim.engine        # simulator sanity checks (decay statistics, cavity steady state)
-./generate.sh               # simulate the dataset
-python baselines.py         # baseline fidelities
-./run_train.sh              # train the CNN and compare against the baselines
-
+python -m sim.engine                                   # simulator sanity checks (1 qubit)
+python -m sim.engine_2q                                # simulator sanity checks (2 qubits)
+python -m data.generate_data --n-qubits 1 --sigma 1.0  # simulate a 1-qubit dataset
+python -m train.train --epochs 20 --arch cnn           # train the CNN and evaluate the baselines
 ```
 
-Any argument can be overridden at the end of the command, for example:
+Two-qubit data and the sweeps:
 
 ```bash
-./generate.sh --sigma 1.0 --T1 2.0 --data-path data/sigma1.pt
-./run_train.sh --data-path data/sigma1.pt --arch gru --checkpoint-dir checkpoints/gru/
-python sweep.py             # full T1 sweep, writes sweep_results.json and t1_fidelity_sweep.png
-
+python -m data.generate_data --n-qubits 2 --sigma 1.0 --zeta 2.0 --leak 0.2 --n-train 5000
+python sweep.py --sweep t1       # single qubit, vary T1
+python sweep.py --sweep zeta     # two qubits, vary the cross-dispersive shift
+python sweep.py --sweep leak     # two qubits, vary the linear leakage
+python sweep.py --sweep zeta --replot   # redraw from saved results without rerunning
 ```
 
 Training uses Apple Silicon (MPS) when `--device mps` is set and falls back to CPU if it is unavailable.
 
-## Sanity checks built into the simulator
+## Sanity checks built into the simulators
 
 `python -m sim.engine` verifies both stages independently:
 
 1. The mean of many excited-qubit trajectories matches $\exp(-t/T_1)$ up to shot noise.
-2. The noise-free cavity field converges to the analytic steady state $-i\varepsilon / (\kappa/2 + i\chi)$.
+2. The noise-free cavity field converges to the analytic steady state $\frac{-i\varepsilon}{\kappa/2 + i\chi}$.
+
+`python -m sim.engine_2q` also checks that with $\zeta = 0$ resonator 1 reproduces the single-qubit response, that the two qubits decay independently, and that the steady states with $\zeta \neq 0$ match the analytic values.
 
 ## Possible extensions
 
-* Bayes-optimal classifier (marginalizing over the decay time) as a performance ceiling.
-* Two- and three-qubit multiplexed readout with signal leakage and state-dependent shifts between resonators, comparing independent matched filters, a joint linear filter, and a joint network.
-* Noise sweeps, and training-set-size scaling.
+- Bayes-optimal classifier (marginalizing over the decay time) as a performance ceiling.
+- An MLP baseline, a sweep with both $\zeta$ and $\eta$ nonzero, and a noise sweep.
+- Non-Gaussian noise, where linear filters tuned for white noise should struggle.
+- Superposition and entangled input states, which turn readout into state tomography.
 
 ## Earlier version of this repository
 
@@ -120,10 +152,9 @@ The project began as a parameter-fitting and pulse-control pipeline for a driven
 
 ## References
 
-* **PyTorch** for the neural networks and training loops.
-* **QuTiP** for the quantum-jump simulation. If you build on the QuTiP parts of this project, please cite:
-> J. R. Johansson, P. D. Nation, and F. Nori, "QuTiP 2: A Python framework for the dynamics of open quantum systems," Comput. Phys. Commun. **184**, 1234 (2013).
-> N. Lambert et al., "QuTiP 5: The Quantum Toolbox in Python," arXiv:2412.04705 (2024).
-
-
-* **NumPy & Matplotlib** for data handling and plotting.
+- **PyTorch** and **Scikit-Learn** for the neural networks, baselines, and training loops.
+- **QuTiP** for the quantum-jump simulation. If you build on the QuTiP parts of this project, please cite:
+  > J. R. Johansson, P. D. Nation, and F. Nori, "QuTiP 2: A Python framework for the dynamics of open quantum systems," Comput. Phys. Commun. **184**, 1234 (2013).
+  >
+  > N. Lambert et al., "QuTiP 5: The Quantum Toolbox in Python," arXiv:2412.04705 (2024).
+- **NumPy & Matplotlib** for data handling and plotting.
