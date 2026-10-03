@@ -5,6 +5,7 @@ A small, self-contained project on **dispersive qubit readout**: deciding whethe
 This project is an engineering demonstration rather than novel research. It implements an established concept—that neural networks handle mid-readout qubit relaxation better than linear filters—using a custom QuTiP simulator. The objective is to rigorously benchmark the exact regime where machine learning outperforms classical methods, and where it simply ties them.
 
 ---
+![Assignment Fidelity vs T1 sweep plot](t1_fidelity_sweep.png)
 
 ## The problem
 
