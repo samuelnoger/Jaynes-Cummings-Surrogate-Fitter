@@ -5,7 +5,6 @@ A small, self-contained project on **dispersive qubit readout**: deciding whethe
 This project is an engineering demonstration rather than novel research. It implements an established concept—that neural networks handle mid-readout qubit relaxation better than linear filters—using a custom QuTiP simulator. The objective is to rigorously benchmark the exact regime where machine learning outperforms classical methods, and where it simply ties them.
 
 ---
-<img src="t1_fidelity_sweep.png" alt="Assignment Fidelity vs T1 sweep plot" width="600">
 
 ## The problem
 
@@ -47,14 +46,7 @@ Thresholds are chosen on training data, the best epoch is chosen on a validation
 
 Sweep over the qubit relaxation time at fixed readout window (2 µs) and noise $\sigma = 1$. The table gives approximate values read from the figure (3 seeds each); exact numbers are in `sweep_results.json` after running the sweep.
 
-| $T_1$ (µs) | Integrated | Matched filter | CNN |
-| --- | --- | --- | --- |
-| 0.5 | 0.715 | 0.766 | 0.792 |
-| 1.0 | 0.806 | 0.835 | 0.869 |
-| 2.0 | 0.878 | 0.889 | 0.922 |
-| 3.0 | 0.911 | 0.916 | 0.945 |
-| 5.0 | 0.941 | 0.943 | 0.965 |
-| 15.0 | 0.980 | 0.980 | 0.987 |
+<img src="t1_fidelity_sweep.png" alt="Assignment Fidelity vs T1 sweep plot" width="600">
 
 Observations:
 
