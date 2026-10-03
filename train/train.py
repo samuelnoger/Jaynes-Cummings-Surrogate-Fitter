@@ -3,76 +3,86 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import TensorDataset, DataLoader
-from tqdm import tqdm  
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.utils.data import TensorDataset, DataLoader
+from tqdm import tqdm
 
-from model import ParameterConditionedSurrogate
+from model import ReadoutCNN, ReadoutGRU
+from baselines import assignment_fidelity, evaluate_baselines
 from train import parse_args
+
+
+@torch.no_grad()
+def predict(model, x, device, bs=2048):
+    model.eval()
+    out = [model(x[i:i + bs].to(device)).squeeze(1).cpu() for i in range(0, len(x), bs)]
+    return (torch.cat(out) > 0).numpy().astype(int)
+
 
 def main():
     args = parse_args()
+    torch.manual_seed(args.seed)
+
     device = torch.device(args.device)
-    print(f"--- Parameter-Conditioned Surrogate Training ---")
-    print(f"Device: {device}")
+    if args.device == "mps" and not torch.backends.mps.is_available():
+        print("MPS not available, falling back to CPU")
+        device = torch.device("cpu")
+    print(f"--- Readout classifier training ({args.arch}) on {device} ---")
 
-    # Load dataset
-    print(f"Loading surrogate dataset from {args.data_path}...")
-    dataset_file = torch.load(args.data_path)
-    inputs = dataset_file['inputs']   
-    targets = dataset_file['targets'] 
-    
-    dataset = TensorDataset(inputs, targets)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+    data = torch.load(args.data_path)
+    tr, va, te = data["train"], data["val"], data["test"]
+    print(f"Dataset physics: {data['phys']}")
 
-    # Initialize Model and Optimizer
-    model = ParameterConditionedSurrogate(
-        hidden_neurons=args.hidden_neurons
-    ).to(device)
-    
+    scale = tr["x"].std()                        # normalise inputs by the training std
+    xtr, xva, xte = tr["x"] / scale, va["x"] / scale, te["x"] / scale
+    T = xtr.shape[1]
+
+    if args.arch == "cnn":
+        model = ReadoutCNN(T, hidden=args.hidden_neurons)
+    else:
+        model = ReadoutGRU(hidden=args.hidden_neurons)
+    model = model.to(device)
+
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
-    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=getattr(args, 'min_lr', 1e-6))
-    criterion = nn.MSELoss()
+    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=args.min_lr)
+    criterion = nn.BCEWithLogitsLoss()
+    loader = DataLoader(TensorDataset(xtr, tr["y"]), batch_size=args.batch_size, shuffle=True)
 
-    # 2. Wrap the epochs loop with tqdm
-    print(f"Starting surrogate training for {args.epochs} epochs...")
-    pbar = tqdm(range(1, args.epochs + 1), desc="Training Surrogate")
-
+    best_fid, best_state = 0.0, None
+    pbar = tqdm(range(1, args.epochs + 1), desc="Training")
     for epoch in pbar:
         model.train()
-        running_loss = 0.0
-        
-        for batch_inputs, batch_targets in dataloader:
-            batch_inputs = batch_inputs.to(device)
-            batch_targets = batch_targets.to(device)
-            
+        running = 0.0
+        for xb, yb in loader:
+            xb, yb = xb.to(device), yb.to(device)
             optimizer.zero_grad()
-            
-            t = batch_inputs[:, 0:1]         
-            params = batch_inputs[:, 1:4]    
-            
-            predictions = model(t, params)
-            loss = criterion(predictions, batch_targets)
+            loss = criterion(model(xb).squeeze(1), yb)
             loss.backward()
             optimizer.step()
-            
-            running_loss += loss.item() * batch_inputs.size(0)
+            running += loss.item() * xb.size(0)
             
         scheduler.step()
-        epoch_loss = running_loss / len(dataset)
-        current_lr = scheduler.get_last_lr()[0]
-        
-        # 3. Update the progress bar postfix with live training metrics
-        pbar.set_postfix({
-            'Loss': f"{epoch_loss:.2e}",
-            'LR': f"{current_lr:.2e}"
-        })
 
-    # Save final checkpoint
+        fid = assignment_fidelity(predict(model, xva, device), va["y"].numpy())
+        if fid > best_fid:                       # keep best epoch by validation fidelity
+            best_fid = fid
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+        pbar.set_postfix({'Loss': f"{running / len(xtr):.3e}", 'ValFid': f"{fid:.4f}"})
+
+    model.load_state_dict(best_state)
     os.makedirs(args.checkpoint_dir, exist_ok=True)
-    save_path = os.path.join(args.checkpoint_dir, "surrogate_final.pth")
-    torch.save(model.state_dict(), save_path)
-    print(f"Surrogate training complete. Model saved to {save_path}")
+    ckpt_path = os.path.join(args.checkpoint_dir, f"readout_{args.arch}.pth")
+    torch.save({"state_dict": best_state, "scale": scale.item(), "arch": args.arch,
+                "hidden": args.hidden_neurons, "seq_len": T, "phys": data["phys"]}, ckpt_path)
+
+    nn_fid = assignment_fidelity(predict(model, xte, device), te["y"].numpy())
+    base = evaluate_baselines(tr, te)
+    print("\nTest assignment fidelity")
+    print(f"  integrated threshold : {base['integrated']:.4f}")
+    print(f"  matched filter       : {base['matched']:.4f}")
+    print(f"  {args.arch.upper():<21s}: {nn_fid:.4f}")
+    print(f"Model saved to {ckpt_path}")
+
 
 if __name__ == "__main__":
     main()

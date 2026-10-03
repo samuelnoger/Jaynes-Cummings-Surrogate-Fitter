@@ -1,1 +1,1 @@
-from .surrogate_model import ParameterConditionedSurrogate
+from .readout_model import ReadoutCNN, ReadoutGRU
