@@ -44,7 +44,7 @@ Thresholds are chosen on training data, the best epoch is chosen on a validation
 
 ## Results
 
-Sweep over the qubit relaxation time at fixed readout window (2 µs) and noise $\sigma = 1$. The table gives approximate values read from the figure (3 seeds each); exact numbers are in `sweep_results.json` after running the sweep.
+Sweep over the qubit relaxation time at fixed readout window (2 µs) and noise $\sigma = 1$.
 
 <img src="t1_fidelity_sweep.png" alt="Assignment Fidelity vs T1 sweep plot" width="600">
 
